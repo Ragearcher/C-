@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>C 语言冒险岛 · 边玩边学</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-logo c-logo">C</span>
+    <div class="brand-text">
+      <strong>C 语言冒险岛</strong>
+      <small>打怪升级，慢慢学会 C 语言</small>
+    </div>
+  </div>
+  <div class="tabs-wrap"><button class="icon-btn small" id="tabs-prev" title="上一页栏目">‹</button><nav class="tabs" id="tabs">
+    <button class="tab is-active" data-view="map">🗺️ 关卡</button>
+    <button class="tab" data-view="advanced">🧭 进阶</button>
+    <button class="tab" data-view="challenges">⚔️ 挑战</button>
+    <button class="tab" data-view="daily">📅 每日一题</button><button class="tab" data-view="wrong">📕 错题本</button><button class="tab" data-view="projects">🛠️ 项目</button>
+    <button class="tab" data-view="achievements">🏆 成就</button><button class="tab" data-view="music">🎵 音乐</button><button class="tab" data-view="knowledge">📌 知识点</button>
+  </nav><button class="icon-btn small" id="tabs-next" title="下一页栏目">›</button></div>
+  <div class="hud">
+    <div class="hud-item" title="当前等级"><span class="hud-label">Lv</span><span class="hud-value" id="hud-level">1</span></div>
+    <div class="hud-item" title="经验值"><span class="hud-icon">✨</span><span class="hud-value" id="hud-xp">0</span></div><label class="font-control" title="文字大小"><span id="font-label">100%</span><input type="range" id="font-size" min="50" max="500" value="100" step="10"></label>
+    <button class="icon-btn" id="btn-sidebar" title="显示或隐藏关卡栏">☰</button><button class="icon-btn" id="btn-theme" title="切换深浅色">🌙</button><button class="icon-btn" id="btn-quit" title="退出">✕</button>
+  </div>
+</header>
+<div class="xpbar-wrap"><div class="xpbar" id="xpbar"></div></div>
+<div class="server-warning" id="server-warning" hidden></div><div class="update-banner" id="update-banner" hidden><span id="update-text">发现新版本</span><button class="btn primary" id="update-open">去下载</button><button class="btn ghost" id="update-close">稍后</button></div>
+
+<main class="layout">
+  <aside class="sidebar" id="sidebar" hidden>
+    <div class="sidebar-head">
+      <span id="sidebar-title">冒险地图</span>
+      <button class="icon-btn small" id="sidebar-arrow" title="折叠或展开关卡栏">◀</button><button class="icon-btn small" id="btn-back" title="返回列表">←</button>
+    </div>
+    <div class="sidebar-body" id="sidebar-body"></div>
+  </aside>
+  <section class="stage" id="stage"></section>
+</main>
+
+<div class="toast-layer" id="toast-layer"></div>
+<div class="modal-mask" id="modal-mask" hidden>
+  <div class="modal">
+    <div class="modal-emoji" id="modal-emoji">🎉</div>
+    <h2 id="modal-title">通关！</h2>
+    <p id="modal-desc"></p>
+    <div class="modal-xp" id="modal-xp"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="modal-close">留在本关</button>
+      <button class="btn primary" id="modal-next">下一关 →</button>
+    </div>
+  </div>
+</div>
+
+<script src="data-lessons.js"></script>
+<script src="data-advanced.js"></script>
+<script src="data-challenges.js"></script><audio id="global-audio"></audio><script src="data-daily.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

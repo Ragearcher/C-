@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>为什么你的 for 循环可以更快 - 编程日报</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="logo" href="/index.html">编程日报</a>
+  <nav class="main-nav">
+    <a href="/index.html">首页</a>
+    <a href="/news.html">全部新闻</a>
+    <a href="/shop.html">商城</a>
+    <a href="/about.html">关于我们</a>
+  </nav>
+</header>
+
+<div class="layout">
+  <main class="main">
+    <article class="post">
+      <h1 class="post-title">为什么你的 for 循环可以更快</h1>
+      <div class="post-meta">
+        <span class="post-date">2026-09-08</span>
+        <span class="post-views">阅读 8.7k</span>
+        <span class="post-tags"><span class="tag">性能优化</span><span class="tag">Python</span></span>
+      </div>
+      <div class="post-body">
+<p>很多人写循环时会习惯性在循环体里做重复计算，这是最常见的一类浪费。</p>
+<p>比如每次都算一遍 <code>len(data)</code>，或者反复查找同一个字典的键。
+把不随循环变化的东西提到循环外面，通常能省下 10% 到 30%。</p>
+<h3>两个立刻能用的技巧</h3>
+<p>第一，用列表推导式代替「建空列表再 append」，它少了一层方法调用的开销。</p>
+<p>第二，需要同时拿到下标和元素时用 <code>enumerate</code>，别自己维护一个计数器变量。</p>
+      </div>
+    </article>
+    <p class="more"><a href="/news.html">← 返回新闻列表</a></p>
+  </main>
+
+  <aside class="sidebar">
+    <div class="widget hot">
+      <h3>热门标签</h3>
+      <ul>
+        <li><a href="/news.html">Python</a></li>
+        <li><a href="/news.html">性能优化</a></li>
+        <li><a href="/news.html">数据结构</a></li>
+      </ul>
+    </div>
+    <div class="widget ad">
+      <p>广告位招租</p>
+      <a href="/about.html">联系我们</a>
+    </div>
+  </aside>
+</div>
+
+<footer class="site-footer">
+  <p>编程日报 · 这是一个用于学习爬虫的示例站点，内容均为虚构。</p>
+  <p><a href="/robots.txt">robots.txt</a></p>
+</footer>
+</body>
+</html>

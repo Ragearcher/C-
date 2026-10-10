@@ -1,0 +1,51 @@
+/* 编程日报 · 样式（爬虫练习站，抓 HTML 时用不到它） */
+* { box-sizing: border-box; }
+body { margin: 0; font-family: -apple-system, "Microsoft YaHei", sans-serif;
+       color: #1c2434; background: #f4f6fb; line-height: 1.75; }
+.site-header { display: flex; align-items: center; gap: 24px; padding: 14px 28px;
+               background: #fff; border-bottom: 1px solid #e2e8f2; }
+.logo { font-weight: 800; font-size: 18px; color: #2f6df6; text-decoration: none; }
+.main-nav a { margin-right: 16px; color: #4d5a70; text-decoration: none; font-size: 14px; }
+.layout { max-width: 1000px; margin: 24px auto; padding: 0 20px;
+          display: grid; grid-template-columns: minmax(0,1fr) 240px; gap: 24px; }
+.main, .sidebar .widget { background: #fff; border: 1px solid #e2e8f2; border-radius: 12px; }
+.main { padding: 24px 26px; }
+.page-title, .post-title { margin: 0 0 18px; font-size: 24px; }
+.news-list { list-style: none; margin: 0; padding: 0; }
+.news-item { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+             padding: 13px 0; border-bottom: 1px dashed #e2e8f2; }
+.news-title { flex: 1 1 260px; color: #1c2434; text-decoration: none; font-weight: 600; }
+.news-title:hover { color: #2f6df6; }
+.news-date { color: #8794a8; font-size: 13px; font-variant-numeric: tabular-nums; }
+.news-tags .tag, .post-tags .tag { display: inline-block; margin-right: 6px; padding: 1px 8px;
+    background: #e8f0ff; color: #2f6df6; border-radius: 20px; font-size: 12px; }
+.post-meta { display: flex; gap: 16px; align-items: center; flex-wrap: wrap;
+             color: #8794a8; font-size: 13px; padding-bottom: 14px;
+             border-bottom: 1px solid #e2e8f2; margin-bottom: 18px; }
+.post-body h3 { margin: 22px 0 8px; font-size: 16px; }
+.post-body code { background: #f2f6ff; padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+.pager { display: flex; justify-content: space-between; align-items: center;
+         margin-top: 20px; font-size: 14px; }
+.pager a { color: #2f6df6; text-decoration: none; }
+.pager-cur { color: #8794a8; }
+.more { margin-top: 20px; }
+.more a { color: #2f6df6; text-decoration: none; }
+.sidebar .widget { padding: 16px 18px; margin-bottom: 16px; }
+.widget h3 { margin: 0 0 10px; font-size: 14px; }
+.widget ul { list-style: none; margin: 0; padding: 0; }
+.widget li { padding: 4px 0; font-size: 13px; }
+.widget a { color: #4d5a70; text-decoration: none; }
+.ad { text-align: center; color: #8794a8; font-size: 13px; }
+.site-footer { max-width: 1000px; margin: 30px auto 60px; padding: 0 20px;
+               color: #8794a8; font-size: 13px; }
+.site-footer a { color: #8794a8; }
+
+/* 商品列表。价格故意混着千分位（¥1,299.00），库存有一两条是 0 ——
+   真实站点的数据就是这么脏的，清洗是爬虫项目里必须过的一关。 */
+.product-list { list-style: none; margin: 0; padding: 0; }
+.product-item { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
+                padding: 12px 0; border-bottom: 1px dashed #e2e8f2; }
+.product-name { flex: 1 1 220px; font-weight: 600; }
+.product-price { color: #e5484d; font-weight: 700; font-variant-numeric: tabular-nums; }
+.product-stock { color: #8794a8; font-size: 13px; }
+.product-stock.out { color: #e5484d; }

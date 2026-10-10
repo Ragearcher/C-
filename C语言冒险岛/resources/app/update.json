@@ -1,0 +1,5 @@
+{
+  "_说明": "桌面版自动更新的发布源配置。manifestUrl 留空 = 完全不检查更新（也不会发出任何网络请求）。填上之后应用启动时会去拉这个清单，发现新版本就显示更新横幅。格式见 update-check.js。生产环境请用 https 地址，并在清单里给出 sha256。环境变量 PQ_UPDATE_URL 可以覆盖这里的值（测试用）。",
+  "_当前源": "GitHub Release 当静态源。这个地址是永久固定的 —— releases/latest 永远指向最新那个 release 里的 latest.json，所以以后发多少版都不用改这里。清单里的安装包地址带版本号，由 desktop/make-manifest.py 生成。发布用 desktop/gh-release.js。",
+  "manifestUrl": "https://github.com/qiuwaa/python-quest-releases/releases/latest/download/latest.json"
+}

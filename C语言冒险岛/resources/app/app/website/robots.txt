@@ -1,0 +1,16 @@
+# 编程日报 · 爬虫约定
+# 这是一个教学用的示例站点，用来演示 robots.txt 该怎么读。
+
+User-agent: *
+Allow: /news.html
+Allow: /news-2.html
+Allow: /post-1.html
+Allow: /post-2.html
+Allow: /post-3.html
+Allow: /post-4.html
+Allow: /post-5.html
+Disallow: /about.html
+Disallow: /admin/
+
+# 建议抓取间隔（秒）
+Crawl-delay: 1

@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>数据清洗实战：一份脏 CSV 的改造记 - 编程日报</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="logo" href="/index.html">编程日报</a>
+  <nav class="main-nav">
+    <a href="/index.html">首页</a>
+    <a href="/news.html">全部新闻</a>
+    <a href="/shop.html">商城</a>
+    <a href="/about.html">关于我们</a>
+  </nav>
+</header>
+
+<div class="layout">
+  <main class="main">
+    <article class="post">
+      <h1 class="post-title">数据清洗实战：一份脏 CSV 的改造记</h1>
+      <div class="post-meta">
+        <span class="post-date">2026-09-02</span>
+        <span class="post-views">阅读 4.3k</span>
+        <span class="post-tags"><span class="tag">数据处理</span><span class="tag">Python</span></span>
+      </div>
+      <div class="post-body">
+<p>拿到手的真实数据，很少有干净的时候。这份 CSV 里有全角空格、有空字符串冒充的缺失值、
+还有「1,234」这种带千分位的数字。</p>
+<h3>清洗的顺序很重要</h3>
+<p>先统一编码和空白字符，再处理缺失值，最后才是类型转换。顺序反了会反复返工。</p>
+<p>另外强烈建议每一步都打印一下数据的形状和几行样子，不要一口气写完再跑。</p>
+      </div>
+    </article>
+    <p class="more"><a href="/news.html">← 返回新闻列表</a></p>
+  </main>
+
+  <aside class="sidebar">
+    <div class="widget hot">
+      <h3>热门标签</h3>
+      <ul>
+        <li><a href="/news.html">Python</a></li>
+        <li><a href="/news.html">性能优化</a></li>
+        <li><a href="/news.html">数据结构</a></li>
+      </ul>
+    </div>
+    <div class="widget ad">
+      <p>广告位招租</p>
+      <a href="/about.html">联系我们</a>
+    </div>
+  </aside>
+</div>
+
+<footer class="site-footer">
+  <p>编程日报 · 这是一个用于学习爬虫的示例站点，内容均为虚构。</p>
+  <p><a href="/robots.txt">robots.txt</a></p>
+</footer>
+</body>
+</html>

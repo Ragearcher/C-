@@ -1,0 +1,20 @@
+{
+  "note": "靶场文件清单，由 website/_generate.py 生成，勿手改",
+  "files": [
+    "/404.html",
+    "/about.html",
+    "/hot.json",
+    "/index.html",
+    "/news-2.html",
+    "/news.html",
+    "/post-1.html",
+    "/post-2.html",
+    "/post-3.html",
+    "/post-4.html",
+    "/post-5.html",
+    "/robots.txt",
+    "/shop-2.html",
+    "/shop.html",
+    "/style.css"
+  ]
+}

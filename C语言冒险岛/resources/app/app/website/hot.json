@@ -1,0 +1,36 @@
+{
+  "site": "编程日报",
+  "date": "2026-09-16",
+  "items": [
+    {
+      "title": "数据清洗实战：一份脏 CSV 的改造记",
+      "heat": "4.3k",
+      "url": "/post-4.html"
+    },
+    {
+      "title": "Python 3.14 正式发布：这次真的快了不少",
+      "heat": "12.4k",
+      "url": "/post-1.html"
+    },
+    {
+      "title": "关于我们",
+      "heat": "1.2k",
+      "url": "/about.html"
+    },
+    {
+      "title": "类型注解到底值不值得写",
+      "heat": "3.2k",
+      "url": "/post-5.html"
+    },
+    {
+      "title": "为什么你的 for 循环可以更快",
+      "heat": "8.7k",
+      "url": "/post-2.html"
+    },
+    {
+      "title": "从零理解递归：把大问题拆成小问题",
+      "heat": "6.1k",
+      "url": "/post-3.html"
+    }
+  ]
+}
