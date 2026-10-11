@@ -70,7 +70,8 @@ class Fail extends Error {}
 function parseArgs(argv) {
   const a = {
     bump: null, dryRun: false, noGit: false, notes: null,
-    root: DEFAULT_INSTALL_ROOT, force: false, skipBuild: false, set: null
+    root: DEFAULT_INSTALL_ROOT, force: false, skipBuild: false,
+    set: null, syncVersion: false, allowRepublish: false
   };
   for (let i = 0; i < argv.length; i++) {
     const t = argv[i];
@@ -81,6 +82,8 @@ function parseArgs(argv) {
     else if (t === '--dry-run') a.dryRun = true;
     else if (t === '--no-git') a.noGit = true;
     else if (t === '--yes' || t === '-y') a.force = true;
+    else if (t === '--sync-version') a.syncVersion = true;
+    else if (t === '--allow-republish') a.allowRepublish = true;
     else if (t === '--help' || t === '-h') { usage(); process.exit(0); }
     else if (t === '--no-build') a.skipBuild = true;
     else { bad('未知参数：' + t); usage(); process.exit(2); }
@@ -106,6 +109,8 @@ ${C.bold}C语言冒险岛 · 一键发布${C.reset}
 
   --bump patch|minor|major  先把版本号递增并写回 version.json 再发布
   --set x.y.z               只把版本号写成指定值后退出（用于把本地改回测试基线）
+  --sync-version            把本地版本号对齐线上最新 Release 后退出
+  --allow-republish         允许发布一个线上已经存在的版本号（只覆盖 asset）
   --dry-run                 只打包 + 校验，不调 GitHub API
   --no-git                  跳过同步仓库 / 提交 / push
   --no-build                复用已有 zip，不重新打包
@@ -140,6 +145,18 @@ function bumpVersion(v, kind) {
   else if (kind === 'minor') { min++; pat = 0; }
   else { pat++; }
   return `${maj}.${min}.${pat}`;
+}
+
+// a < b ？
+function semverLess(a, b) {
+  const p = (v) => {
+    const m = String(v || '').replace(/^v/i, '').match(/^(\d+)\.(\d+)\.(\d+)/);
+    return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+  };
+  const x = p(a), y = p(b);
+  if (!x || !y) return false;
+  for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] < y[i];
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -656,14 +673,16 @@ async function interactiveMenu() {
   say('  ' + C.cyan + '1' + C.reset + ') 发布补丁版     版本号 +1 后发布（最常用）');
   say('  ' + C.cyan + '2' + C.reset + ') 发布当前版本   不改版本号，直接发布');
   say('  ' + C.cyan + '3' + C.reset + ') 只打包校验     不碰 GitHub');
-  say('  ' + C.cyan + '4' + C.reset + ') 还原测试基线   把本地版本号改回 1.0.0');
+  say('  ' + C.cyan + '4' + C.reset + ') 同步版本号     把本地版本号对齐线上最新版');
+  say('  ' + C.cyan + '5' + C.reset + ') 还原测试基线   把本地版本号改回 1.0.0');
   say('  ' + C.cyan + '0' + C.reset + ') 退出');
   say('');
   const ans = (await ask('请输入序号后回车: ')).trim();
   if (ans === '1') return ['--bump', 'patch'];
   if (ans === '2') return [];
   if (ans === '3') return ['--dry-run'];
-  if (ans === '4') return ['--set', '1.0.0'];
+  if (ans === '4') return ['--sync-version'];
+  if (ans === '5') return ['--set', '1.0.0'];
   if (ans === '0' || ans === '') return null;
   bad('无法识别的选项：' + ans);
   return null;
@@ -692,16 +711,65 @@ async function main(argv) {
     ok(`已把版本号写成 ${data.tag}（${vfile}），未发布任何东西`);
     return;
   }
+  // 先把「将要发布的版本号」算出来，但先不写回文件 ——
+  // 万一后面的防重复校验拦下来，本地版本号不应该被改脏。
+  let bumpPending = false;
   if (args.bump) {
-    const nextVer = bumpVersion(data.version, args.bump);
-    const nextTag = 'v' + nextVer;
-    data.version = nextVer;
-    data.tag = nextTag;
+    tag = 'v' + bumpVersion(data.version, args.bump);
+    bumpPending = true;
+    say(`    ${args.bump} 递增：${data.tag} -> ${tag}（校验通过后写回）`);
+  }
+  if (args.syncVersion) {
+    const tk0 = loadToken(root);
+    if (!tk0) throw new Fail('同步版本号需要 Token（要读线上最新 Release）');
+    const r = await httpsJson('GET', `https://api.github.com/repos/${REPO_SLUG}/releases/latest`, tk0.token);
+    if (!r.ok || !r.body || !r.body.tag_name) {
+      throw new Fail(`读取线上最新 Release 失败：HTTP ${r.status} ${brief(r.body)}`);
+    }
+    const t = String(r.body.tag_name);
+    data.version = t.replace(/^v/i, '');
+    data.tag = t;
     fs.writeFileSync(vfile, JSON.stringify(data));
-    tag = nextTag;
-    ok(`${args.bump} 递增：${tag} 已写回 ${vfile}`);
+    ok(`本地版本号已同步成线上最新：${t}（${vfile}），未发布任何东西`);
+    return;
   }
   const version = String(tag).replace(/^v/i, '');
+
+  // 防重复发布：本地版本号如果落后于线上，bump 出来的可能是「已经发过的版本」，
+  // 那样只会覆盖 asset，已经装过该版本的用户永远收不到更新提示。
+  if (!args.dryRun && !args.allowRepublish) {
+    const tk0 = loadToken(root);
+    if (tk0) {
+      const r = await httpsJson('GET', `https://api.github.com/repos/${REPO_SLUG}/releases/latest`, tk0.token);
+      const latest = r.ok && r.body ? String(r.body.tag_name || '') : '';
+      if (latest && latest.toLowerCase() === tag.toLowerCase()) {
+        say('');
+        warn(`线上最新已经是 ${tag}，再发同一个版本号没用：`);
+        say('      ' + C.dim + '已经装过 ' + tag + ' 的用户，本地 version.json 已经是这个版本，');
+        say('      更新器不会再提示他们，这次发布等于只换了 asset。' + C.reset);
+        say('');
+        say('      想推送给所有人，请任选一种：');
+        say('        ' + C.cyan + '发布新版本.bat --bump patch' + C.reset + '   版本号 +1（推荐）');
+        say('        ' + C.cyan + '发布新版本.bat --sync-version' + C.reset + '  先把本地版本号对齐线上最新，再改代码');
+        say('      确实只想覆盖 asset（比如修好一个发坏的包），加 ' + C.cyan + '--allow-republish' + C.reset + '。');
+        throw new Fail('检测到重复版本号，已中止（本地版本号没有被改动）');
+      }
+      if (latest && semverLess(tag, latest)) {
+        warn(`注意：本地版本 ${tag} 低于线上最新 ${latest}，发布后线上仍会显示 ${latest}。`);
+      }
+    }
+  }
+
+  if (bumpPending) {
+    if (args.dryRun) {
+      say('    ' + C.dim + '（--dry-run 只演算版本号，不写回文件）' + C.reset);
+    } else {
+      data.version = String(tag).replace(/^v/i, '');
+      data.tag = tag;
+      fs.writeFileSync(vfile, JSON.stringify(data));
+      ok(`已把 ${tag} 写回 ${vfile}`);
+    }
+  }
 
   // 2. 打包
   step('[2/6] 打包');
