@@ -40,8 +40,11 @@ GITHUB_REPO = 'Ragearcher/C-'
 EXE_NAME = 'C++ 冒险岛.exe'
 MANIFEST_REL = os.path.join('resources', 'app', 'version.json')
 
-# 不允许进入压缩包的顶层条目
-EXCLUDE_TOP = {'C语言冒险岛', 'tools', 'desktop.ini', 'Thumbs.db'}
+# 不允许进入压缩包的顶层条目（与 tools/publish.js 的规则保持一致）
+EXCLUDE_TOP = {
+    'C语言冒险岛', 'tools', 'desktop.ini', 'Thumbs.db',
+    '发布新版本.bat', 'publish-config.json', 'publish-config.json.example', '.env',
+}
 EXCLUDE_SUFFIX = ('.zip', '.lnk', '.tmp', '.log')
 
 

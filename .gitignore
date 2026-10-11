@@ -1,1 +1,11 @@
 *.exe
+
+# 发布脚本的本地配置，绝对不要提交
+publish-config.json
+.env
+.env.local
+
+# 本地打出来的压缩包与日志
+*.zip
+update_log.txt
+update_result.log
