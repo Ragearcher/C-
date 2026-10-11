@@ -1048,6 +1048,9 @@
     log.scrollTop = log.scrollHeight;
   }
 
+  // 最近一次「检查更新」读到的版本信息，供提示文案使用
+  let lastCheck = { localTag: '', latest: '' };
+
   // force = true 表示用户手动点了「检查更新」，此时忽略「忽略本次」记录
   async function checkForUpdates(force) {
     try {
@@ -1060,6 +1063,8 @@
         const latest = String((r && r.latest) || '').trim();
         const latestKey = latest.toLowerCase();
         const skipped = state.updateSkipped || {};
+        lastCheck = { localTag, latest };
+        console.log('[update] 当前版本 ' + (localTag || '(未知)') + '，远端最新 ' + (latest || '(未知)'));
 
         // 兜底闸门：本地版本已经等于远端 tag_name 时，绝对不渲染更新横幅。
         // 这是防止「更新成功后仍反复提示」的最后一道防线。
@@ -1076,7 +1081,9 @@
         const banner = $('#update-banner');
         if (banner) {
           $('#update-title').textContent = `发现新版本 ${latest}`;
-          $('#update-notes').textContent = r.notes || ('大小约 ' + Math.round((r.size || 0) / 1024 / 1024) + ' MB');
+          $('#update-notes').textContent =
+            (localTag ? `当前版本 ${localTag}　→　新版本 ${latest}　·　` : '') +
+            (r.notes || ('大小约 ' + Math.round((r.size || 0) / 1024 / 1024) + ' MB'));
           banner.hidden = false;
           $('#update-progress').hidden = true;
           $('#update-open').hidden = false;
@@ -1133,6 +1140,7 @@
       const banner = $('#update-banner');
       const skipped = state.updateSkipped || {};
       const key = String(data.version).toLowerCase();
+      lastCheck = { localTag: String(data.current || '').toLowerCase(), latest: String(data.version) };
       if (data.version !== '1.0.0' && data.downloadUrl && (!!force || !skipped[key])) {
         if (banner) {
           $('#update-title').textContent = `发现新版本 ${data.version}`;
@@ -1216,7 +1224,9 @@
     });
     $('#btn-update').addEventListener('click', async () => {
       const result = await checkForUpdates(true);
-      if (result === 'none') toast('当前已经是最新版本。');
+      const cur = lastCheck.localTag ? `当前版本 ${lastCheck.localTag}` : '';
+      if (result === 'none') toast(cur ? `${cur}，已是最新版本。` : '当前已经是最新版本。');
+      else if (result === 'update') toast(`${cur ? cur + '，' : ''}发现新版本 ${lastCheck.latest}。`);
       else if (result === 'error') toast('检查更新失败，请稍后重试。');
     });
     $('#btn-theme').addEventListener('click', () => {
