@@ -165,7 +165,54 @@ def verify_zip(out_zip, tag, expect_repo=False):
         ok &= check(EXE_NAME in names, '包内存在 %s' % EXE_NAME)
         bad = [n for n in names if n.lower().endswith(('.zip', '.lnk'))]
         ok &= check(not bad, '包内没有多余的 zip / 快捷方式')
+        # 压平断言：exe 与 version.json 必须恰好一份、且位于包根目录。
+        # 出现两次就说明压缩时把外层目录一起打进去了（「套娃」）。
+        exe_hits = [n for n in names if n == EXE_NAME or n.endswith('/' + EXE_NAME)]
+        ok &= check(len(exe_hits) == 1 and exe_hits[0] == EXE_NAME,
+                    '%s 恰好一份且位于包根目录（实际 %d 份）' % (EXE_NAME, len(exe_hits)))
+        mf_hits = [n for n in names if n.endswith('resources/app/version.json')]
+        ok &= check(len(mf_hits) == 1 and mf_hits[0] == MANIFEST_REL.replace(os.sep, '/'),
+                    'resources/app/version.json 恰好一份且位于包根目录（实际 %d 份）' % len(mf_hits))
+        deep = [n for n in names if n.count('/') > 4]
+        ok &= check(not deep, '包内层级正常，没有多余的嵌套目录')
     return ok
+
+
+def resolve_source(explicit):
+    """
+    游戏根目录绝不靠猜：按优先级取候选，逐个校验「同时含 exe 和 resources/app/version.json」。
+    目录有嵌套（安装目录里放着 git 仓库，仓库里又跟踪一份游戏副本），所以必须显式 + 校验。
+    """
+    cands = []
+    if explicit:
+        cands.append(('命令行 --source', os.path.abspath(explicit)))
+    cfg = os.path.join(INSTALL_ROOT, 'publish-config.json')
+    try:
+        j = json.load(open(cfg, encoding='utf-8'))
+        v = j.get('installRoot') or j.get('gameRoot')
+        if v:
+            cands.append(('publish-config.json 的 installRoot', os.path.abspath(v)))
+    except Exception:
+        pass
+    cands.append(('默认（仓库目录的上两级）', INSTALL_ROOT))
+
+    good = [c for c in cands
+            if os.path.exists(os.path.join(c[1], EXE_NAME))
+            and os.path.exists(os.path.join(c[1], MANIFEST_REL))]
+    if not good:
+        log('')
+        log('  [失败] 找不到合法的游戏根目录，要求同时存在 %s 和 %s：' % (EXE_NAME, MANIFEST_REL))
+        for c in cands:
+            log('    - %s   (%s)' % (c[1], c[0]))
+        log('')
+        log('  请在 %s 里显式写死绝对路径：' % cfg)
+        log('    { "token": "...", "installRoot": "D:\\\\\\\\Tools\\\\\\\\C语言冒险岛" }')
+        raise SystemExit(2)
+    if len(good) > 1:
+        log('  [警告] 有多个目录都像游戏根目录（存在嵌套），已按优先级选用最靠前的：')
+        for i, c in enumerate(good):
+            log('    %s %s   (%s)' % ('->' if i == 0 else '  ', c[1], c[0]))
+    return good[0][1]
 
 
 def human(n):
@@ -306,7 +353,8 @@ def sync_repo(src, tag):
 def main():
     ap = argparse.ArgumentParser(description='C语言冒险岛 发布打包')
     ap.add_argument('--tag', required=True, help='发布版本号，例如 v1.0.1')
-    ap.add_argument('--source', default=INSTALL_ROOT, help='源目录（安装根目录）')
+    ap.add_argument('--source', default=None,
+                    help='源目录（游戏根目录），默认自动解析并校验；也可写在 publish-config.json 的 installRoot 里')
     ap.add_argument('--out', default=DEFAULT_OUT, help='输出目录')
     ap.add_argument('--installer', action='store_true', help='同时重建桌面安装包 exe')
     ap.add_argument('--installer-include-repo', action='store_true',
@@ -318,7 +366,7 @@ def main():
     ap.add_argument('--skip-zip', action='store_true', help='跳过 zip 构建')
     args = ap.parse_args()
 
-    src = os.path.abspath(args.source)
+    src = resolve_source(args.source)
     out_dir = os.path.abspath(args.out)
     os.makedirs(out_dir, exist_ok=True)
 

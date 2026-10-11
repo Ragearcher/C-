@@ -9,3 +9,8 @@ publish-config.json
 *.zip
 update_log.txt
 update_result.log
+
+# Python 缓存
+tools/__pycache__/
+__pycache__/
+*.pyc

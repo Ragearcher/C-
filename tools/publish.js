@@ -70,7 +70,7 @@ class Fail extends Error {}
 function parseArgs(argv) {
   const a = {
     bump: null, dryRun: false, noGit: false, notes: null,
-    root: DEFAULT_INSTALL_ROOT, force: false, skipBuild: false,
+    root: DEFAULT_INSTALL_ROOT, rootExplicit: false, force: false, skipBuild: false,
     set: null, syncVersion: false, allowRepublish: false
   };
   for (let i = 0; i < argv.length; i++) {
@@ -78,7 +78,7 @@ function parseArgs(argv) {
     if (t === '--bump') a.bump = String(argv[++i] || '').toLowerCase();
     else if (t === '--set') a.set = String(argv[++i] || '').replace(/^v/i, '');
     else if (t === '--notes') a.notes = argv[++i];
-    else if (t === '--root') a.root = path.resolve(argv[++i]);
+    else if (t === '--root') { a.root = path.resolve(argv[++i]); a.rootExplicit = true; }
     else if (t === '--dry-run') a.dryRun = true;
     else if (t === '--no-git') a.noGit = true;
     else if (t === '--yes' || t === '-y') a.force = true;
@@ -455,6 +455,20 @@ function verifyZip(zipPath, tag) {
   if (junk.length) { bad(`包内混入了 ${junk.length} 个垃圾条目，例如 ${junk[0]}`); good = false; }
   else ok('包内没有 .git / 多余 zip');
 
+  // 压平断言：exe 和 resources/app/version.json 都必须恰好出现一次、且位于包根目录。
+  // 出现两次就说明压缩时把外层目录一起打进去了（「套娃」），解压后会覆盖到错误的位置。
+  const exeHits = z.names.filter((n) => n === EXE_NAME || n.endsWith('/' + EXE_NAME));
+  if (exeHits.length === 1 && exeHits[0] === EXE_NAME) ok(`${EXE_NAME} 恰好一份且位于包根目录`);
+  else { bad(`包内 ${EXE_NAME} 出现 ${exeHits.length} 次：${JSON.stringify(exeHits)}`); good = false; }
+
+  const manifestHits = z.names.filter((n) => n.endsWith('resources/app/version.json'));
+  if (manifestHits.length === 1 && manifestHits[0] === MANIFEST_REL) ok('resources/app/version.json 恰好一份且位于包根目录');
+  else { bad(`包内 version.json 出现 ${manifestHits.length} 次：${JSON.stringify(manifestHits)}`); good = false; }
+
+  const deep = z.names.filter((n) => n.split('/').length > 5);
+  if (deep.length) { bad(`包内存在过深层级（${deep.length} 个），例如 ${deep[0]}`); good = false; }
+  else ok('包内层级正常，没有多余的嵌套目录');
+
   return good;
 }
 
@@ -665,6 +679,71 @@ function gitFlow(tag) {
 }
 
 // ---------------------------------------------------------------------------
+// 游戏根目录解析
+//
+// 目录有嵌套（安装目录里放着 git 仓库，仓库里又跟踪了一份游戏副本），
+// 所以绝不靠「猜」：按优先级取候选，逐个校验「同时含 exe 和 resources/app/version.json」，
+// 第一个通过的才算数。全部不通过就直接报错，并告诉用户怎么显式配置。
+// ---------------------------------------------------------------------------
+function configInstallRoot() {
+  const cfg = path.join(DEFAULT_INSTALL_ROOT, 'publish-config.json');
+  try {
+    const j = JSON.parse(fs.readFileSync(cfg, 'utf8'));
+    const v = j.installRoot || j.gameRoot;
+    return v ? path.resolve(v) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function looksLikeGameRoot(dir) {
+  return fs.existsSync(path.join(dir, EXE_NAME)) && fs.existsSync(path.join(dir, MANIFEST_REL));
+}
+
+function resolveInstallRoot(args) {
+  const cands = [];
+  if (args.rootExplicit) cands.push({ from: '命令行 --root', dir: args.root });
+  const cfgRoot = configInstallRoot();
+  if (cfgRoot) cands.push({ from: 'publish-config.json 的 installRoot', dir: cfgRoot });
+  cands.push({ from: '默认（仓库目录的上两级）', dir: DEFAULT_INSTALL_ROOT });
+
+  const okOnes = cands.filter((c) => looksLikeGameRoot(c.dir));
+  if (!okOnes.length) {
+    say('');
+    bad('找不到合法的游戏根目录。要求同时存在 ' + EXE_NAME + ' 和 ' + MANIFEST_REL + '，以下候选都不满足：');
+    cands.forEach((c) => say('    - ' + c.dir + '   (' + c.from + ')'));
+    say('');
+    say('  请在下面这个文件里显式写死绝对路径（JSON 里反斜杠要写两个）：');
+    say('    ' + path.join(DEFAULT_INSTALL_ROOT, 'publish-config.json'));
+    say('    { "token": "...", "installRoot": "D:\\\\Tools\\\\C语言冒险岛" }');
+    throw new Fail('游戏根目录未确定');
+  }
+  const picked = okOnes[0];
+  if (okOnes.length > 1) {
+    warn('有多个目录都像游戏根目录（存在嵌套），已按优先级选用最靠前的：');
+    okOnes.forEach((c, i) => say('      ' + (i === 0 ? '-> ' : '   ') + c.dir + '   (' + c.from + ')'));
+  }
+  // 提醒：根目录里如果还嵌着同样结构的副本（安装目录里放 git 仓库的常见后果），
+  // 明确说出来是哪个，避免误以为是「真正的游戏根目录」。
+  const nested = [];
+  const scan = (dir, depth) => {
+    if (depth > 2) return;
+    let items = [];
+    try { items = fs.readdirSync(dir); } catch (e) { return; }
+    for (const name of items) {
+      const sub = path.join(dir, name);
+      let isDir = false;
+      try { isDir = fs.statSync(sub).isDirectory(); } catch (e) {}
+      if (!isDir) continue;
+      if (looksLikeGameRoot(sub)) nested.push(sub);
+      else scan(sub, depth + 1);
+    }
+  };
+  scan(picked.dir, 1);
+  return { root: picked.dir, from: picked.from, nested };
+}
+
+// ---------------------------------------------------------------------------
 // 主流程
 // ---------------------------------------------------------------------------
 async function interactiveMenu() {
@@ -690,13 +769,15 @@ async function interactiveMenu() {
 
 async function main(argv) {
   const args = parseArgs(argv);
-  const root = args.root;
   say(`${C.bold}C语言冒险岛 · 一键发布${C.reset}`);
-  say('  游戏根目录: ' + root);
+  const rr = resolveInstallRoot(args);
+  const root = rr.root;
+  say('  游戏根目录: ' + root + C.dim + '   (' + rr.from + '，已校验)' + C.reset);
   say('  仓库目录  : ' + REPO_ROOT);
-
-  if (!fs.existsSync(path.join(root, EXE_NAME))) {
-    throw new Fail('游戏根目录下找不到 ' + EXE_NAME + '，请用 --root 指定正确目录');
+  if (rr.nested.length) {
+    warn('注意：这个根目录里还嵌着一份同样结构的副本，打包时会自动排除：');
+    rr.nested.forEach((n) => say('      ' + n));
+    say('      ' + C.dim + '（这是 git 仓库跟踪的游戏副本，不是游戏真正运行的位置）' + C.reset);
   }
 
   // 1. 版本号

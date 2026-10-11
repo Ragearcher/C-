@@ -170,17 +170,38 @@ function download(url, dest, onProgress) {
 //      —— 打包时忘记改 version.json 反而能通过校验，直接放行旧包。
 //   2. robocopy 去掉 /XO。旧版 /XO 会跳过「比目标更旧」的源文件，
 //      而更新包里的文件时间戳通常早于安装目录，于是 version.json 永远覆盖不上。
-//   3. 覆盖后回读校验目标 version.json，不一致则强制写入目标版本号兜底。
-//   4. 无论成功失败都清理 update.zip / extracted，只保留日志。
-//   5. 写入 update_result.log，完整记录覆盖结果，便于排查。
-//   6. 包内若含嵌套的 C语言冒险岛 目录（误把开发仓库打进包）则先剔除，
-//      避免覆盖用户本地的开发仓库。
+//   3. 游戏根目录不再靠 path.dirname 盲猜，改为「候选路径 + 校验」：
+//      只有真的含有 resources\app\version.json 的那一层才算数（见 resolveGameRoot）。
+//   4. 解压后不盲目使用第一层目录，而是**动态探测**含
+//      resources\app\version.json 的那一层作为真正的源目录，
+//      多套一层目录也能自动纠正（见 [2/6]）。
+//   5. 覆盖后回读游戏根目录的 version.json：版本号没变就判定「文件覆盖失败」，
+//      写进日志并**终止重启**，避免陷入「更新→重启→仍提示更新」的死循环。
+//      （旧版这里会强制改写 version.json 兜底，那会把「代码没覆盖成功」伪装成成功。）
+//   6. 无论成功失败都清理 update.zip / extracted，只保留日志。
 // ---------------------------------------------------------------------------
+function resolveGameRoot(override) {
+  const cands = [];
+  if (override) cands.push(override);
+  if (process.execPath) cands.push(path.dirname(process.execPath));
+  if (process.resourcesPath) cands.push(path.dirname(process.resourcesPath));
+  const seen = new Set();
+  const uniq = cands.filter((c) => c && !seen.has(c) && seen.add(c));
+  const valid = uniq.filter((c) => fs.existsSync(path.join(c, 'resources', 'app', 'version.json')));
+  if (valid.length > 1) {
+    log.warn('检测到多个可能的游戏根目录（目录有嵌套），选用最外层：' + valid[0]);
+    valid.forEach((v) => log.warn('  候选：' + v));
+  }
+  const picked = valid[0] || uniq[0] || process.cwd();
+  log.info('游戏根目录解析为：' + picked + (valid.length ? '（含 resources/app/version.json，已校验）' : '（未找到 version.json，请检查安装）'));
+  return picked;
+}
+
 function buildUpdateBat(expectedTag, expectedVersion, localTag, gameDirOverride) {
   const root = UPDATE_DIR;
   const zip = path.join(root, 'update.zip');
   const extract = path.join(root, 'extracted');
-  const gameDir = gameDirOverride || path.dirname(process.execPath);
+  const gameDir = resolveGameRoot(gameDirOverride);
   const lines = [
     '@echo off',
     'setlocal EnableExtensions',
@@ -201,7 +222,7 @@ function buildUpdateBat(expectedTag, expectedVersion, localTag, gameDirOverride)
     '>> "%LOG%" echo 开始时间: %DATE% %TIME%',
     '>> "%LOG%" echo 更新前本地版本: %OLD%',
     '>> "%LOG%" echo 目标版本: %TAG%',
-    '>> "%LOG%" echo 安装目录: %GAME%',
+    '>> "%LOG%" echo 游戏根目录: %GAME%',
     '>> "%LOG%" echo.',
     '',
     'echo Waiting for program to exit...',
@@ -211,20 +232,36 @@ function buildUpdateBat(expectedTag, expectedVersion, localTag, gameDirOverride)
     'if exist "%EXT%" rmdir /s /q "%EXT%" 2>nul',
     '%PS% "try { Expand-Archive -LiteralPath \'%ZIP%\' -DestinationPath \'%EXT%\' -Force -ErrorAction Stop } catch { Add-Content -LiteralPath \'%LOG%\' -Encoding UTF8 -Value (\'  [失败] 解压出错: \' + $_.Exception.Message); exit 1 }"',
     'if errorlevel 1 goto :fail',
-    'if not exist "%EXT%\\resources\\app\\version.json" goto :no_manifest',
-    '>> "%LOG%" echo   [OK] 包内 resources\\app\\version.json 存在',
-    'goto :strip_nested',
-    ':no_manifest',
-    '>> "%LOG%" echo   [失败] 包内缺少 resources\\app\\version.json，压缩包结构不正确',
+    '>> "%LOG%" echo   [OK] 解压完成',
+    '',
+    '>> "%LOG%" echo [2/6] 探测真正的源目录（含 resources\\app\\version.json 的那一层）',
+    // 用 bat 自己的 for /d 逐层找，不走临时文件：
+    // 把路径写进文件再 set /p 读回来，会因为编码（ASCII/UTF-8/GBK）把中文目录名弄坏。
+    'set "SRC="',
+    'if exist "%EXT%\\resources\\app\\version.json" set "SRC=%EXT%"',
+    'if defined SRC goto :src_found',
+    'for /d %%D in ("%EXT%\\*") do if not defined SRC if exist "%%~fD\\resources\\app\\version.json" set "SRC=%%~fD"',
+    'if defined SRC goto :src_found',
+    'for /d %%D in ("%EXT%\\*") do for /d %%E in ("%%~fD\\*") do if not defined SRC if exist "%%~fE\\resources\\app\\version.json" set "SRC=%%~fE"',
+    'if defined SRC goto :src_found',
+    'for /d %%D in ("%EXT%\\*") do for /d %%E in ("%%~fD\\*") do for /d %%F in ("%%~fE\\*") do if not defined SRC if exist "%%~fF\\resources\\app\\version.json" set "SRC=%%~fF"',
+    ':src_found',
+    'if not defined SRC goto :no_source',
+    'if /i "%SRC%"=="%EXT%" goto :src_flat',
+    '>> "%LOG%" echo   [警告] 包内多套了一层目录，已自动定位到真正的源目录',
+    'goto :src_ok',
+    ':src_flat',
+    '>> "%LOG%" echo   [OK] 包结构正确：resources 直接位于压缩包根目录',
+    ':src_ok',
+    '>> "%LOG%" echo   实际源目录: %SRC%',
+    'goto :read_pkg',
+    ':no_source',
+    '>> "%LOG%" echo   [失败] 解压结果里找不到 resources\\app\\version.json，压缩包结构不正确',
     'goto :fail',
-    ':strip_nested',
-    'if not exist "%EXT%\\C语言冒险岛" goto :read_pkg',
-    '>> "%LOG%" echo   [警告] 包内含有嵌套的 C语言冒险岛 目录，已剔除以免覆盖开发仓库',
-    'rmdir /s /q "%EXT%\\C语言冒险岛" 2>nul',
     ':read_pkg',
     '',
-    '>> "%LOG%" echo [2/6] 校验包内版本号',
-    '%PS% "((Get-Content -Raw \'%EXT%\\resources\\app\\version.json\' | ConvertFrom-Json).tag) | Set-Content -LiteralPath \'%TMPTAG%\' -Encoding ASCII"',
+    '>> "%LOG%" echo [3/6] 校验包内版本号',
+    '%PS% "((Get-Content -Raw \'%SRC%\\resources\\app\\version.json\' | ConvertFrom-Json).tag) | Set-Content -LiteralPath \'%TMPTAG%\' -Encoding ASCII"',
     'set "PKG="',
     'set /p PKG=<"%TMPTAG%"',
     '>> "%LOG%" echo   包内版本: %PKG%',
@@ -234,14 +271,16 @@ function buildUpdateBat(expectedTag, expectedVersion, localTag, gameDirOverride)
     ':pkg_ok',
     '>> "%LOG%" echo   [OK] 包内版本与目标版本一致',
     '',
-    '>> "%LOG%" echo [3/6] 覆盖安装目录',
+    '>> "%LOG%" echo [4/6] 覆盖游戏根目录',
     'set "RETRY=0"',
     ':copy',
     // robocopy 的日期头按控制台代码页输出、文件路径按 OEM 代码页输出，是混合编码。
     // 调用期间把代码页切到 936，让整段输出统一为 GBK，再转码追加进 UTF-8 日志；
     // 恢复 65001 之后才会执行下面含中文的 echo 行，所以 bat 自身的中文不受影响。
     'chcp 936 >nul',
-    'robocopy "%EXT%" "%GAME%" /E /IS /IT /R:5 /W:2 /XJ /NDL /NP > "%ROOT%\\_rc.txt" 2>&1',
+    // /XD .git 是最后一道保险：任何层级的 .git 目录都不复制，
+    // 即使前面没能剔除掉误打包进来的开发仓库副本，也不会把 git 数据覆盖到本地仓库上。
+    'robocopy "%SRC%" "%GAME%" /E /IS /IT /R:5 /W:2 /XJ /XD .git /NDL /NP > "%ROOT%\\_rc.txt" 2>&1',
     'set "RC=%ERRORLEVEL%"',
     'chcp 65001 >nul',
     '%PS% "Get-Content -LiteralPath \'%ROOT%\\_rc.txt\' -Encoding Default -ErrorAction SilentlyContinue | Add-Content -LiteralPath \'%LOG%\' -Encoding UTF8"',
@@ -260,37 +299,25 @@ function buildUpdateBat(expectedTag, expectedVersion, localTag, gameDirOverride)
     'goto :copy',
     '',
     ':verify',
-    '>> "%LOG%" echo [4/6] 回读校验安装目录版本号',
+    '>> "%LOG%" echo [5/6] 回读校验游戏根目录版本号',
     '%PS% "((Get-Content -Raw \'%DEST%\' | ConvertFrom-Json).tag) | Set-Content -LiteralPath \'%TMPTAG%\' -Encoding ASCII"',
     'set "DST="',
     'set /p DST=<"%TMPTAG%"',
-    '>> "%LOG%" echo   覆盖后安装目录版本: %DST%',
+    '>> "%LOG%" echo   覆盖后游戏根目录版本: %DST%',
     'if /i "%DST%"=="%TAG%" goto :verify_ok',
-    '>> "%LOG%" echo   [警告] 覆盖未生效，强制写入目标版本号',
-    '%PS% "$p=\'%DEST%\'; $o=Get-Content -Raw $p | ConvertFrom-Json; $o.tag=\'%TAG%\'; $o.version=\'%VER%\'; $o | ConvertTo-Json -Compress | Set-Content -LiteralPath $p -Encoding UTF8"',
-    '%PS% "((Get-Content -Raw \'%DEST%\' | ConvertFrom-Json).tag) | Set-Content -LiteralPath \'%TMPTAG%\' -Encoding ASCII"',
-    'set "DST="',
-    'set /p DST=<"%TMPTAG%"',
-    '>> "%LOG%" echo   强制写入后版本: %DST%',
-    'if /i not "%DST%"=="%TAG%" goto :fail',
+    '>> "%LOG%" echo   [失败] 文件覆盖失败：游戏根目录的 version.json 仍是 %DST%，没有变成 %TAG%',
+    '>> "%LOG%" echo   [失败] 常见原因：游戏进程没退干净导致文件被占用；或压缩包内容不完整',
+    '>> "%LOG%" echo   [失败] 已保留原版本，并且**不重启游戏**，避免陷入「更新→重启→仍提示更新」的死循环',
+    'goto :fail',
     ':verify_ok',
-    '>> "%LOG%" echo   [OK] 安装目录版本已确认为 %TAG%',
+    '>> "%LOG%" echo   [OK] 游戏根目录版本已确认为 %TAG%',
     '',
-    '>> "%LOG%" echo [5/6] 清理更新缓存',
+    '>> "%LOG%" echo [6/6] 清理更新缓存并重启游戏',
+    '>> "%LOG%" echo RESULT: SUCCESS',
+    '>> "%LOG%" echo 结论: 更新成功，当前版本 %TAG%',
     'del /f /q "%ZIP%" 2>nul',
     'rmdir /s /q "%EXT%" 2>nul',
     'del /f /q "%TMPTAG%" 2>nul',
-    'if exist "%ZIP%" goto :clean_warn',
-    'if exist "%EXT%" goto :clean_warn',
-    '>> "%LOG%" echo   [OK] update.zip 与 extracted 已清理',
-    'goto :clean_done',
-    ':clean_warn',
-    '>> "%LOG%" echo   [警告] 部分缓存未能删除，下次启动时会再次清理',
-    ':clean_done',
-    '',
-    '>> "%LOG%" echo [6/6] 重启游戏',
-    '>> "%LOG%" echo RESULT: SUCCESS',
-    '>> "%LOG%" echo 结论: 更新成功，当前版本 %TAG%',
     'del /f /q "%ROOT%\\update.lock" 2>nul',
     'start "" "%GAME%\\C++ 冒险岛.exe"',
     'endlocal',
@@ -298,12 +325,12 @@ function buildUpdateBat(expectedTag, expectedVersion, localTag, gameDirOverride)
     '',
     ':fail',
     '>> "%LOG%" echo RESULT: FAILED',
-    '>> "%LOG%" echo 结论: 更新失败，安装目录保留原版本，游戏将照常启动',
+    '>> "%LOG%" echo 结论: 更新失败，游戏根目录保留原版本 %OLD%，且**没有重启游戏**',
+    '>> "%LOG%" echo 处理建议: 手动双击游戏图标即可继续玩；游戏启动后会弹出上次失败的原因；要重试就再点一次「下载并更新」',
     'del /f /q "%ZIP%" 2>nul',
     'rmdir /s /q "%EXT%" 2>nul',
     'del /f /q "%TMPTAG%" 2>nul',
     'del /f /q "%ROOT%\\update.lock" 2>nul',
-    'start "" "%GAME%\\C++ 冒险岛.exe"',
     'endlocal',
     'exit /b 1'
   ];
