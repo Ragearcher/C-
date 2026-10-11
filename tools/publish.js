@@ -101,6 +101,7 @@ function usage() {
   say(`
 ${C.bold}C语言冒险岛 · 一键发布${C.reset}
 
+  node publish.js              不带参数时进入交互菜单（双击 .bat 就是这个）
   node publish.js [选项]
 
   --bump patch|minor|major  先把版本号递增并写回 version.json 再发布
@@ -638,8 +639,27 @@ function gitFlow(tag) {
 // ---------------------------------------------------------------------------
 // 主流程
 // ---------------------------------------------------------------------------
-async function main() {
-  const args = parseArgs(process.argv.slice(2));
+async function interactiveMenu() {
+  say('');
+  say(`${C.bold}请选择要做什么：${C.reset}`);
+  say('  ' + C.cyan + '1' + C.reset + ') 发布补丁版     版本号 +1 后发布（最常用）');
+  say('  ' + C.cyan + '2' + C.reset + ') 发布当前版本   不改版本号，直接发布');
+  say('  ' + C.cyan + '3' + C.reset + ') 只打包校验     不碰 GitHub');
+  say('  ' + C.cyan + '4' + C.reset + ') 还原测试基线   把本地版本号改回 1.0.0');
+  say('  ' + C.cyan + '0' + C.reset + ') 退出');
+  say('');
+  const ans = (await ask('请输入序号后回车: ')).trim();
+  if (ans === '1') return ['--bump', 'patch'];
+  if (ans === '2') return [];
+  if (ans === '3') return ['--dry-run'];
+  if (ans === '4') return ['--set', '1.0.0'];
+  if (ans === '0' || ans === '') return null;
+  bad('无法识别的选项：' + ans);
+  return null;
+}
+
+async function main(argv) {
+  const args = parseArgs(argv);
   const root = args.root;
   say(`${C.bold}C语言冒险岛 · 一键发布${C.reset}`);
   say('  游戏根目录: ' + root);
@@ -778,7 +798,18 @@ function cleanupStdin() {
   try { process.stdin.pause(); } catch (e) {}
 }
 
-main().then(cleanupStdin).catch((e) => {
+async function run() {
+  let argv = process.argv.slice(2);
+  // 不带任何参数时给个菜单，方便直接双击 .bat 使用
+  if (argv.length === 0) {
+    const picked = await interactiveMenu();
+    if (!picked) { say('已退出，没有改动任何东西。'); return; }
+    argv = picked;
+  }
+  return main(argv);
+}
+
+run().then(cleanupStdin).catch((e) => {
   say('');
   if (e instanceof Fail) bad(e.message);
   else bad((e && e.stack) ? e.stack : String(e));
