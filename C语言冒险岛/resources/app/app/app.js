@@ -16,7 +16,10 @@
       dailyDone: [],
       dailyCursor: 0,
       sidebarVisible: true,
-      fontSize: 100
+      fontSize: 100,
+      // 用户点过「忽略本次」的版本号集合。按版本记忆：同一个版本不再提示，
+      // 但发布新版本时仍会正常提醒，不会永久屏蔽更新。
+      updateSkipped: {}
     };
   }
 
@@ -1045,20 +1048,123 @@
     log.scrollTop = log.scrollHeight;
   }
 
-  async function checkForUpdates() {
+  // force = true 表示用户手动点了「检查更新」，此时忽略「忽略本次」记录
+  async function checkForUpdates(force) {
     try {
-      const res = await fetch('update.json', { cache: 'no-store' });
-      const data = await res.json();
-      if (!data || !data.version) return;
-      const current = '1.0.0';
-      if (data.version !== current && data.downloadUrl) {
+      if (window.cppNative && window.cppNative.updateCheck) {
+        const r = await window.cppNative.updateCheck();
+        if (r && r.networkError) { if (force) window.alert('网络请求失败，请检查网络连接'); return 'network'; }
+        if (r && r.error) { if (force) window.alert('检查更新失败：' + r.error); return 'error'; }
+
+        const localTag = String((r && r.localTag) || '').trim().toLowerCase();
+        const latest = String((r && r.latest) || '').trim();
+        const latestKey = latest.toLowerCase();
+        const skipped = state.updateSkipped || {};
+
+        // 兜底闸门：本地版本已经等于远端 tag_name 时，绝对不渲染更新横幅。
+        // 这是防止「更新成功后仍反复提示」的最后一道防线。
+        const alreadyLatest = !!localTag && localTag === latestKey;
+        if (alreadyLatest) console.log('[update] 本地版本已是最新 ' + localTag + '，不显示更新横幅');
+        const shouldShow = !!r && r.needsUpdate === true && !alreadyLatest && (!!force || !skipped[latestKey]);
+
+        if (!shouldShow) {
+          const hideBanner = $('#update-banner');
+          if (hideBanner) hideBanner.hidden = true;
+          return 'none';
+        }
+
         const banner = $('#update-banner');
         if (banner) {
-          $('#update-text').textContent = `发现新版本 ${data.version}：${data.notes || '可前往下载最新安装包'}`;
+          $('#update-title').textContent = `发现新版本 ${latest}`;
+          $('#update-notes').textContent = r.notes || ('大小约 ' + Math.round((r.size || 0) / 1024 / 1024) + ' MB');
           banner.hidden = false;
-          $('#update-open').onclick = () => window.open(data.downloadUrl, '_blank');
-          $('#update-close').onclick = () => { banner.hidden = true; };
+          $('#update-progress').hidden = true;
+          $('#update-open').hidden = false;
+          $('#update-close').hidden = false;
+          $('#update-open').onclick = async () => {
+            if (!r.url) { window.alert('下载地址为空，无法更新'); return; }
+            $('#update-open').hidden = true;
+            $('#update-close').hidden = true;
+            $('#update-progress').hidden = false;
+            $('#update-progress-text').textContent = '0%';
+            if (window.cppNative.onUpdateProgress) {
+              window.cppNative.onUpdateProgress((p) => {
+                const pct = p.total ? Math.min(100, Math.round(p.got * 100 / p.total)) : 0;
+                $('#update-progress-bar').style.width = pct + '%';
+                $('#update-progress-text').textContent = pct + '%';
+              });
+            }
+            try {
+              // 必须把远端目标版本一并交给主进程，否则 update.bat 的版本校验会反向
+              const applied = await window.cppNative.updateApply(r.url, latest);
+              if (applied && applied.ok) {
+                $('#update-title').textContent = '正在重启并更新，请稍候...';
+                $('#update-notes').textContent = '更新完成后游戏会自动重新打开。';
+                setTimeout(() => { if (window.cppNative.quit) window.cppNative.quit(); }, 600);
+              } else {
+                const msg = (applied && applied.error) || '未知错误';
+                window.alert('更新失败：' + msg);
+                $('#update-open').hidden = false;
+                $('#update-close').hidden = false;
+                $('#update-progress').hidden = true;
+              }
+            } catch (e) {
+              window.alert('下载失败：' + (e && e.message ? e.message : String(e)));
+              $('#update-open').hidden = false;
+              $('#update-close').hidden = false;
+              $('#update-progress').hidden = true;
+            }
+          };
+          // 「忽略本次」按版本号记忆：本版本不再提示，发布新版本时仍会提醒
+          $('#update-close').onclick = () => {
+            banner.hidden = true;
+            state.updateSkipped = state.updateSkipped || {};
+            state.updateSkipped[latestKey] = true;
+            saveState();
+          };
         }
+        return 'update';
+      }
+
+      // 浏览器兜底：没有 Electron 主进程时读 update.json
+      const res = await fetch('update.json', { cache: 'no-store' });
+      const data = await res.json();
+      if (!data || !data.version) return 'error';
+      const banner = $('#update-banner');
+      const skipped = state.updateSkipped || {};
+      const key = String(data.version).toLowerCase();
+      if (data.version !== '1.0.0' && data.downloadUrl && (!!force || !skipped[key])) {
+        if (banner) {
+          $('#update-title').textContent = `发现新版本 ${data.version}`;
+          $('#update-notes').textContent = data.notes || '';
+          banner.hidden = false;
+          $('#update-open').hidden = false;
+          $('#update-close').hidden = false;
+          $('#update-open').onclick = () => window.open(data.downloadUrl, '_blank');
+          $('#update-close').onclick = () => {
+            banner.hidden = true;
+            state.updateSkipped = state.updateSkipped || {};
+            state.updateSkipped[key] = true;
+            saveState();
+          };
+        }
+        return 'update';
+      }
+      if (banner) banner.hidden = true;
+      return 'none';
+    } catch (e) {
+      return 'error';
+    }
+  }
+
+  // 展示上一次自动更新的失败原因（主进程只报告一次，成功后不再打扰）
+  async function reportLastUpdateResult() {
+    try {
+      if (!window.cppNative || !window.cppNative.updateLastResult) return;
+      const r = await window.cppNative.updateLastResult();
+      if (r && r.ok === false && r.reason) {
+        window.alert('上次自动更新未成功，已保留原版本。\n\n' + r.reason +
+          '\n\n完整日志：%TEMP%\\C-Adventure-Island-Update\\update_result.log');
       }
     } catch (e) {}
   }
@@ -1108,6 +1214,11 @@
       saveState();
       applyFontSize();
     });
+    $('#btn-update').addEventListener('click', async () => {
+      const result = await checkForUpdates(true);
+      if (result === 'none') toast('当前已经是最新版本。');
+      else if (result === 'error') toast('检查更新失败，请稍后重试。');
+    });
     $('#btn-theme').addEventListener('click', () => {
       state.theme = (document.documentElement.dataset.theme === 'dark') ? 'light' : 'dark';
       saveState();
@@ -1119,7 +1230,8 @@
     });
     $('#btn-back').addEventListener('click', () => setView(state.currentView || 'map'));
     checkHealth();
-    checkForUpdates();
+    checkForUpdates(false);
+    reportLastUpdateResult();
   }
 
   init();

@@ -4,6 +4,8 @@ const fs = require('fs');
 const path = require('path');
 const { app, BrowserWindow, BrowserView, protocol, ipcMain, Menu, shell } = require('electron');
 const { CPP_COMPILER, executeCpp, checkCode } = require('./cpp-engine');
+const { checkUpdate, downloadAndApply, cleanupStaleUpdate, readLastUpdateResult } = require('./engine/update-check');
+const log = require('./engine/log');
 
 app.setPath('userData', path.join(app.getPath('appData'), 'C++ 冒险岛'));
 const APP_DIR = path.join(__dirname, 'app');
@@ -112,6 +114,30 @@ function wireIpc() {
       return { ok: false, compileError: false, stage: 'run', stdout: '', stderr: e && e.message ? e.message : String(e) };
     }
   });
+  ipcMain.handle('cpp:update-check', async () => {
+    try { return await checkUpdate(); }
+    catch (e) { return { needsUpdate: false, error: e && e.message ? e.message : String(e) }; }
+  });
+  ipcMain.handle('cpp:update-apply', async (_event, payload) => {
+    try {
+      const url = payload && payload.url;
+      const tag = payload && payload.tag;
+      log.info('开始下载更新包：' + url + '（目标版本 ' + tag + '）');
+      // 注意：这里必须传「远端目标版本」，而不是本地版本。
+      // 旧实现传的是本地 tag，导致 update.bat 的版本校验逻辑完全反向。
+      return await downloadAndApply(url, tag, (got, total) => {
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('cpp:update-progress', { got, total });
+        }
+      });
+    } catch (e) {
+      return { ok: false, error: e && e.message ? e.message : String(e) };
+    }
+  });
+  ipcMain.handle('cpp:update-last-result', () => {
+    try { return readLastUpdateResult(); }
+    catch (e) { return null; }
+  });
   ipcMain.handle('cpp:check', async (_event, payload) => {
     try {
       return await checkCode((payload && payload.code) || '', (payload && payload.stdin) || '', (payload && payload.check) || {});
@@ -131,11 +157,14 @@ if (!app.requestSingleInstanceLock()) {
     }
   });
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     protocol.handle('app', serveApp);
     wireIpc();
     Menu.setApplicationMenu(null);
     createWindow();
+    // 延迟清理上一次更新残留的 update.zip / extracted。
+    // 延后 8 秒是为了避开 update.bat 收尾阶段的竞态。
+    setTimeout(() => { try { cleanupStaleUpdate(); } catch (e) {} }, 8000);
   });
 
   app.on('activate', () => {

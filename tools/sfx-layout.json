@@ -1,0 +1,13 @@
+{
+  "_说明": "C语言冒险岛 安装包(SFX)的固定布局参数。由原安装包逆向得到，用于同布局重建。",
+  "payload_offset": 1948,
+  "payload_len": 520400306,
+  "tail_size": 11954,
+  "total_size": 520414208,
+  "section_text_rawend": 520406528,
+  "section_rsrc_ptr": 520406528,
+  "section_rsrc_size": 7168,
+  "section_reloc_ptr": 520413696,
+  "section_reloc_size": 512,
+  "blob_note": "payload 之后紧接 4274 字节的 .NET 自解压启动器，再是 .rsrc / .reloc"
+}

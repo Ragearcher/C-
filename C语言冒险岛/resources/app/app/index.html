@@ -25,11 +25,11 @@
   <div class="hud">
     <div class="hud-item" title="当前等级"><span class="hud-label">Lv</span><span class="hud-value" id="hud-level">1</span></div>
     <div class="hud-item" title="经验值"><span class="hud-icon">✨</span><span class="hud-value" id="hud-xp">0</span></div><label class="font-control" title="文字大小"><span id="font-label">100%</span><input type="range" id="font-size" min="50" max="500" value="100" step="10"></label>
-    <button class="icon-btn" id="btn-sidebar" title="显示或隐藏关卡栏">☰</button><button class="icon-btn" id="btn-theme" title="切换深浅色">🌙</button><button class="icon-btn" id="btn-quit" title="退出">✕</button>
+    <button class="icon-btn" id="btn-sidebar" title="显示或隐藏关卡栏">☰</button><button class="icon-btn" id="btn-update" title="检查更新">🔄</button><button class="icon-btn" id="btn-theme" title="切换深浅色">🌙</button><button class="icon-btn" id="btn-quit" title="退出">✕</button>
   </div>
 </header>
 <div class="xpbar-wrap"><div class="xpbar" id="xpbar"></div></div>
-<div class="server-warning" id="server-warning" hidden></div><div class="update-banner" id="update-banner" hidden><span id="update-text">发现新版本</span><button class="btn primary" id="update-open">去下载</button><button class="btn ghost" id="update-close">稍后</button></div>
+<div class="server-warning" id="server-warning" hidden></div><div class="update-banner" id="update-banner" hidden><div class="update-left"><span class="update-new">NEW</span><div class="update-title" id="update-title">发现新版本</div><div class="update-notes" id="update-notes"></div></div><div class="update-right"><button class="btn primary" id="update-open">下载并更新</button><button class="btn ghost" id="update-close">忽略本次</button><div class="update-progress" id="update-progress" hidden><div class="progress-track"><div class="progress-bar" id="update-progress-bar"></div></div><span id="update-progress-text">0%</span></div></div></div>
 
 <main class="layout">
   <aside class="sidebar" id="sidebar" hidden>
