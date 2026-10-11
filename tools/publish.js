@@ -511,8 +511,19 @@ const brief = (b) => (typeof b === 'string' ? b : JSON.stringify(b));
 async function ensureRelease(tag, token, notes) {
   const existing = await httpsJson('GET', `https://api.github.com/repos/${REPO_SLUG}/releases/tags/${tag}`, token);
   if (existing.status === 200) {
+    const rel = existing.body;
+    const wantName = `C语言冒险岛 ${tag}`;
+    // 复用已有 Release 时也要把说明同步过去，否则更新日志永远不会生效
+    const patch = {};
+    if (notes && (rel.body || '') !== notes) patch.body = notes;
+    if (rel.name !== wantName) patch.name = wantName;
+    if (Object.keys(patch).length) {
+      const up = await httpsJson('PATCH', `https://api.github.com/repos/${REPO_SLUG}/releases/${rel.id}`, token, patch);
+      if (up.ok) { ok(`已更新 Release ${tag} 的说明`); return up.body; }
+      warn(`更新 Release 说明失败：HTTP ${up.status} ${brief(up.body)}`);
+    }
     ok(`Release ${tag} 已存在，将复用并覆盖同名 Asset`);
-    return existing.body;
+    return rel;
   }
   if (existing.status !== 404) {
     if (existing.status === 401) throw new Fail('Token 无效或已过期（HTTP 401），请重新生成一个 PAT');
