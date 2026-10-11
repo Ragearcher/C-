@@ -80,7 +80,10 @@ def walk_payload(src, include_repo=False):
             yield abspath, relpath.replace(os.sep, '/')
 
 
-def build_zip(src, tag, out_zip, include_repo=False):
+PAD_NAME = '_padding_do_not_extract.bin'
+
+
+def build_zip(src, tag, out_zip, include_repo=False, pad_to=None):
     log('[1] 打包 ' + out_zip)
     manifest = manifest_for(tag)
     count = 0
@@ -95,7 +98,46 @@ def build_zip(src, tag, out_zip, include_repo=False):
             count += 1
             total += os.path.getsize(abspath)
     log('    条目 %d 个，原始 %s' % (count, human(total)))
+    if pad_to:
+        pad_zip_to(out_zip, pad_to)
     return count
+
+
+def pad_zip_to(out_zip, target):
+    """
+    把压缩包精确补齐到 target 字节。
+
+    自解压存根要求内嵌载荷长度与预留容量严格相等：
+      * 前面补零 -> ZIP 内记录的本地文件头偏移整体错位，解压报错
+      * 后面补零 -> 中央目录结束记录跑出尾部回溯窗口，解压静默失败
+    所以只能在 ZIP 内部加一个未压缩的占位条目来凑长度。
+    setup.bat 会在复制到安装目录之前把它删掉，不会留下垃圾文件。
+    """
+    base = os.path.getsize(out_zip)
+    # 新增一个条目对包大小的贡献 = 本地头(30+名称) + 中央目录项(46+名称)
+    overhead = 76 + 2 * len(PAD_NAME)
+    data_size = target - base - overhead
+    if data_size < 0:
+        raise SystemExit('内容 %s 已超过预留容量 %s，无法补齐'
+                         % (human(base), human(target)))
+    info = zipfile.ZipInfo(PAD_NAME, date_time=(2020, 1, 1, 0, 0, 0))
+    info.compress_type = zipfile.ZIP_STORED
+    info.external_attr = 0o600 << 16
+    info.file_size = data_size
+    info.compress_size = data_size
+    with zipfile.ZipFile(out_zip, 'a') as zf:
+        with zf.open(info, 'w') as w:
+            chunk = b'\x00' * (4 << 20)
+            left = data_size
+            while left > 0:
+                n = min(left, len(chunk))
+                w.write(chunk[:n])
+                left -= n
+    final = os.path.getsize(out_zip)
+    if final != target:
+        raise SystemExit('载荷补齐失败：%d != %d' % (final, target))
+    log('    占位条目 %s %s，载荷已精确补齐到 %s'
+        % (PAD_NAME, human(data_size), human(final)))
 
 
 def verify_zip(out_zip, tag, expect_repo=False):
@@ -151,88 +193,83 @@ def sha256_of(path):
 # 只有当新载荷比原载荷大时才后移启动器与段表，并同步修正段表里的偏移。
 # ---------------------------------------------------------------------------
 def build_installer(zip_path, out_exe, layout_path, head_path, tail_path):
+    """
+    重建桌面安装包。
+
+    这个 PE 其实是一个 .NET 自解压程序，约束比看上去严得多：
+
+    1. .NET 元数据（BSJB 段）在 .text 末尾，位置被 CLR 头以 RVA 引用。
+       RVA 映射到文件偏移依赖段表，所以元数据、.rsrc、.reloc 的文件偏移
+       一个字节都不能动 —— 移动就会变成「不是有效的 Win32 应用程序」。
+    2. 存根从文件尾部向前回溯查找 ZIP 的中央目录结束记录（EOCD），
+       并且要求 ZIP 从偏移 1948 开始。载荷前面补零会让 ZIP 内记录的
+       本地文件头偏移整体错位，后面补零会让 EOCD 跑出回溯窗口。
+
+    结论：载荷长度必须与预留容量严格相等。这个由 pad_zip_to() 在打包时
+    用一个未压缩占位条目补齐，安装脚本会在复制前删掉它。
+    """
     log('[3] 重建桌面安装包 ' + out_exe)
     layout = json.load(open(layout_path, encoding='utf-8'))
     head = open(head_path, 'rb').read()
     tail = open(tail_path, 'rb').read()
-    payload_len = layout['payload_len']
+    off = layout['payload_offset']
+    capacity = layout['payload_len']
     zip_len = os.path.getsize(zip_path)
-    delta = zip_len - payload_len
 
-    # 载荷起点固定 1948 不变，启动器与 .rsrc/.reloc 整体跟随载荷移动。
-    # 这样「载荷结束到文件末尾」的距离始终保持 11954 字节不变 —— 自解压启动器
-    # 靠这个尾部结构定位 zip 的中央目录，所以绝不能用补零的方式对齐长度。
-    if delta < 0:
-        mode = '载荷缩小 %s，尾部整体前移' % human(-delta)
-    elif delta > 0:
-        mode = '载荷增大 %s，尾部整体后移' % human(delta)
-    else:
-        mode = '载荷长度不变，无需改动段表'
-    log('    载荷 %s -> 原 %s（%s）' % (human(zip_len), human(payload_len), mode))
+    if zip_len != capacity:
+        raise SystemExit(
+            '载荷 %d 字节与预留容量 %d 字节不相等，存根无法定位。\n'
+            '请用 --installer 走 build_zip(pad_to=...) 自动补齐。' % (zip_len, capacity)
+        )
 
     with open(out_exe, 'wb') as out, open(zip_path, 'rb') as zf:
         out.write(head)
         shutil.copyfileobj(zf, out, 1024 * 1024)
         out.write(tail)
 
-    if delta != 0:
-        patch_section_table(out_exe, delta)
-
     size = os.path.getsize(out_exe)
-    log('    生成完成，大小 %s（原 %s）' % (human(size), human(layout['total_size'])))
+    if size != layout['total_size']:
+        raise SystemExit('文件大小 %d 与原始 %d 不一致，头部偏移可能已被破坏'
+                         % (size, layout['total_size']))
+    log('    载荷 %s，与预留容量完全相等' % human(zip_len))
+    log('    生成完成，大小 %s（与原始完全一致，头部偏移未变）' % human(size))
     return size
 
 
-def patch_section_table(exe_path, delta):
-    """载荷长度变化后同步修正段表，保证 PE 结构自洽。"""
-    with open(exe_path, 'r+b') as f:
-        header = bytearray(f.read(4096))
-        e_lfanew = struct.unpack_from('<I', header, 0x3C)[0]
-        nsec = struct.unpack_from('<H', header, e_lfanew + 6)[0]
-        optsz = struct.unpack_from('<H', header, e_lfanew + 20)[0]
-        sec_off = e_lfanew + 24 + optsz
-        for i in range(nsec):
-            o = sec_off + i * 40
-            name = bytes(header[o:o + 8]).rstrip(b'\x00').decode('ascii', 'replace')
-            vsize, vaddr, rawsize, rawptr = struct.unpack_from('<IIII', header, o + 8)
-            if name == '.text':
-                struct.pack_into('<IIII', header, o + 8, vsize + delta, vaddr, rawsize + delta, rawptr)
-            elif name in ('.rsrc', '.reloc'):
-                struct.pack_into('<IIII', header, o + 8, vsize, vaddr, rawsize, rawptr + delta)
-        if delta > 0:
-            # 段变大时才需要抬高映像大小；缩小时保持不变即可
-            so_img = e_lfanew + 24 + 56
-            size_of_image = struct.unpack_from('<I', header, so_img)[0]
-            align = struct.unpack_from('<I', header, e_lfanew + 24 + 32)[0] or 0x1000
-            grow = ((delta + align - 1) // align) * align
-            struct.pack_into('<I', header, so_img, size_of_image + grow)
-        f.seek(0)
-        f.write(header)
-    log('    已修正段表（.text / .rsrc / .reloc）')
-
-
-def verify_installer(exe_path):
+def verify_installer(exe_path, layout_path):
     log('[4] 校验安装包内嵌载荷')
+    layout = json.load(open(layout_path, encoding='utf-8'))
+    off = layout['payload_offset']
+    lf_off = layout['length_field_offset']
     ok = True
     with open(exe_path, 'rb') as f:
         f.seek(0x3C)
         e_lfanew = struct.unpack('<I', f.read(4))[0]
         f.seek(e_lfanew)
         ok &= check(f.read(4) == b'PE\x00\x00', 'PE 头合法')
-        f.seek(1948)
-        head_bytes = f.read(4)
-        ok &= check(head_bytes == b'PK\x03\x04', '载荷起始为 ZIP 本地文件头')
-        f.seek(0)
-        blob = f.read()
-    start = blob.find(b'PK\x03\x04')
+        f.seek(lf_off)
+        payload_len = struct.unpack('<I', f.read(4))[0]
+        ok &= check(0 < payload_len <= layout['payload_len'],
+                    '载荷长度字段 = %s（容量 %s）' % (human(payload_len), human(layout['payload_len'])))
+        f.seek(off)
+        region = f.read(payload_len)
+        ok &= check(len(region) == payload_len, '按长度字段截取到完整载荷区')
+        ok &= check(region[:4] == b'PK\x03\x04', '载荷起始为 ZIP 本地文件头')
+        payload = region
+
+    # 关键：必须像存根一样「按长度字段截取载荷区」再解析。
+    # 载荷区之后还有 .NET 元数据与 .rsrc/.reloc，直接把文件尾丢给 zip 解析器
+    # 会因为中央目录超出回溯窗口而报 File is not a zip file。
     import io
     try:
-        with zipfile.ZipFile(io.BytesIO(blob[start:])) as zf:
+        with zipfile.ZipFile(io.BytesIO(payload)) as zf:
             names = zf.namelist()
             data = json.loads(zf.read(MANIFEST_REL.replace(os.sep, '/')).decode('utf-8'))
             ok &= check(True, '内嵌载荷可正常解析，共 %d 个条目' % len(names))
-            ok &= check(data.get('tag') is not None,
-                        '安装后版本号 = %s' % data.get('tag'))
+            ok &= check(data.get('tag') is not None, '安装后版本号 = %s' % data.get('tag'))
+            ok &= check(not [n for n in names if n.startswith('C语言冒险岛/')],
+                        '内嵌载荷没有混入开发仓库目录')
+            ok &= check(PAD_NAME in names, '占位条目存在（安装时会被 setup.bat 删除）')
     except Exception as e:
         ok &= check(False, '内嵌载荷解析失败：%s' % e)
     return ok
@@ -251,6 +288,11 @@ def sync_repo(src, tag):
         os.makedirs(target_dir, exist_ok=True)
         for name in filenames:
             shutil.copy2(os.path.join(dirpath, name), os.path.join(target_dir, name))
+    # 根目录下会变动的脚本
+    for name in ('setup.bat',):
+        s = os.path.join(src, name)
+        if os.path.exists(s):
+            shutil.copy2(s, os.path.join(REPO_PAYLOAD, name))
     # 仓库里记录的是「当前发布版本」
     with open(os.path.join(dst_app, 'version.json'), 'w', encoding='utf-8') as f:
         f.write(manifest_for(tag))
@@ -312,16 +354,19 @@ def main():
     if args.installer:
         inst_tag = args.installer_tag or args.tag
         inst_zip = os.path.join(out_dir, '_installer_payload%s.zip' % inst_tag)
+        layout = json.load(open(os.path.join(HERE, 'sfx-layout.json'), encoding='utf-8'))
         # 安装包只装游戏本体，不再把开发仓库目录与 .git 一起打进去
-        # （原安装包 496MB，其中 256MB 是 .git 松散对象，纯属垃圾）
-        build_zip(src, inst_tag, inst_zip, include_repo=args.installer_include_repo)
+        # （原安装包 496MB，其中 256MB 是 .git 松散对象，纯属垃圾）。
+        # 载荷必须精确等于存根预留容量，由 pad_zip_to 用占位条目补齐。
+        build_zip(src, inst_tag, inst_zip,
+                  include_repo=args.installer_include_repo, pad_to=layout['payload_len'])
         if not verify_zip(inst_zip, inst_tag, expect_repo=args.installer_include_repo):
             ok = False
         inst_out = args.installer_out or os.path.join(os.path.dirname(out_dir), 'C语言冒险岛安装包.exe')
         ensure_sfx_parts(args.sfx_template)
         build_installer(inst_zip, inst_out, os.path.join(HERE, 'sfx-layout.json'),
                         os.path.join(HERE, 'sfx-head.bin'), os.path.join(HERE, 'sfx-tail.bin'))
-        ok &= verify_installer(inst_out)
+        ok &= verify_installer(inst_out, os.path.join(HERE, 'sfx-layout.json'))
         os.remove(inst_zip)
         log('    sha256 %s' % sha256_of(inst_out))
         log('')

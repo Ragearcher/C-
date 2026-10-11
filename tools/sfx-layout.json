@@ -9,5 +9,7 @@
   "section_rsrc_size": 7168,
   "section_reloc_ptr": 520413696,
   "section_reloc_size": 512,
-  "blob_note": "payload 之后紧接 4274 字节的 .NET 自解压启动器，再是 .rsrc / .reloc"
+  "blob_note": "payload 之后紧接 4274 字节的 .NET 自解压启动器，再是 .rsrc / .reloc",
+  "length_field_offset": 1944,
+  "length_field_note": "载荷长度字段：stub 用它定位内嵌 zip，重建时必须同步改写"
 }
