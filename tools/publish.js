@@ -137,8 +137,21 @@ function readManifest(root) {
   return { file: p, data: j };
 }
 
-function bumpVersion(v, kind) {
-  const m = String(v).replace(/^v/i, '').match(/^(\d+)\.(\d+)\.(\d+)/);
+// 顺手把 resources/app/package.json 的 version 也对齐，避免以后分不清手上这份是哪一版
+function writePackageVersion(root, version) {
+  const p = path.join(root, 'resources', 'app', 'package.json');
+  try {
+    const j = JSON.parse(fs.readFileSync(p, 'utf8'));
+    if (j.version === version) return;
+    j.version = version;
+    fs.writeFileSync(p, JSON.stringify(j, null, 2) + '\n');
+    ok('已把 resources/app/package.json 版本同步为 ' + version);
+  } catch (e) {
+    warn('同步 package.json 版本失败（不影响发布）：' + (e && e.message ? e.message : String(e)));
+  }
+}
+
+function bumpVersion(v, kind) {  const m = String(v).replace(/^v/i, '').match(/^(\d+)\.(\d+)\.(\d+)/);
   if (!m) throw new Fail('版本号格式不是 x.y.z：' + v);
   let [maj, min, pat] = [Number(m[1]), Number(m[2]), Number(m[3])];
   if (kind === 'major') { maj++; min = 0; pat = 0; }
@@ -789,6 +802,7 @@ async function main(argv) {
     data.version = args.set;
     data.tag = 'v' + args.set;
     fs.writeFileSync(vfile, JSON.stringify(data));
+    writePackageVersion(root, args.set);
     ok(`已把版本号写成 ${data.tag}（${vfile}），未发布任何东西`);
     return;
   }
@@ -811,6 +825,7 @@ async function main(argv) {
     data.version = t.replace(/^v/i, '');
     data.tag = t;
     fs.writeFileSync(vfile, JSON.stringify(data));
+    writePackageVersion(root, data.version);
     ok(`本地版本号已同步成线上最新：${t}（${vfile}），未发布任何东西`);
     return;
   }
@@ -848,6 +863,7 @@ async function main(argv) {
       data.version = String(tag).replace(/^v/i, '');
       data.tag = tag;
       fs.writeFileSync(vfile, JSON.stringify(data));
+      writePackageVersion(root, data.version);
       ok(`已把 ${tag} 写回 ${vfile}`);
     }
   }

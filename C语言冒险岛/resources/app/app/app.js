@@ -525,6 +525,14 @@
     const hit = words.find((w) => text.includes(w[0]));
     return hit ? `${item.goal || ''}。大白话：${hit[1]}` : (item.goal || '完成本题');
   }
+  // 判题只看答案对不对：宽松判过时给一句说明，让学生知道「是写法不同，不是答案错」
+  const LOOSE_MATCH_TEXT = {
+    width: '已忽略全角/半角差异',
+    whitespace: '已忽略空白与换行差异',
+    numeric: '已按数值等价判定',
+    line: '答案出现在输出中'
+  };
+
   function setOutput(result) {
     const out = $('#output');
     const status = $('#status');
@@ -559,8 +567,17 @@
     }
     out.textContent = [result.stdout, result.stderr].filter(Boolean).join('\n');
     out.className = 'output stdout';
-    status.textContent = result.pass ? '通过' : (result.ok ? '运行成功' : '未通过');
-    status.className = result.pass ? 'status pass' : (result.ok ? 'status pass' : 'status fail');
+    // 判题接口（/api/check）会带 pass / matchMode，运行接口（/api/run）不带。
+    // 必须区分开：判题没过就要显示「未通过」，不能因为程序本身跑起来了就显示绿色「运行成功」。
+    const judged = typeof result.pass === 'boolean' || typeof result.matchMode === 'string';
+    if (judged) {
+      const loose = result.pass ? LOOSE_MATCH_TEXT[result.matchMode] : '';
+      status.textContent = result.pass ? (loose ? '通过 · ' + loose : '通过') : '未通过';
+      status.className = result.pass ? 'status pass' : 'status fail';
+    } else {
+      status.textContent = result.ok ? '运行成功' : '运行失败';
+      status.className = result.ok ? 'status pass' : 'status fail';
+    }
   }
 
 
@@ -762,12 +779,10 @@
       const stdin = currentStdin();
       let result;
       if (markOnPass) {
-        if (kind === 'project') {
-          result = await api('/api/run', { code, stdin });
-          result.pass = result.ok;
-        } else {
-          result = await api('/api/check', { code, stdin, check: item.check });
-        }
+        // 提交判题：统一走 /api/check，由后端按 check.type 判定。
+        // 项目题也走这里（check = { type: 'project' }），不再用「退出码为 0」当通过标准。
+        const check = item.check || { type: kind === 'project' ? 'project' : 'run' };
+        result = await api('/api/check', { code, stdin, check });
       } else {
         if (kind === 'challenge' || kind === 'daily') {
           result = await api('/api/check', { code, stdin, check: item.check });
@@ -1055,7 +1070,7 @@
   async function checkForUpdates(force) {
     try {
       if (window.cppNative && window.cppNative.updateCheck) {
-        const r = await window.cppNative.updateCheck();
+        const r = await window.cppNative.updateCheck(force);
         if (r && r.networkError) { if (force) window.alert('网络请求失败，请检查网络连接'); return 'network'; }
         if (r && r.error) { if (force) window.alert('检查更新失败：' + r.error); return 'error'; }
 
@@ -1098,12 +1113,15 @@
               window.cppNative.onUpdateProgress((p) => {
                 const pct = p.total ? Math.min(100, Math.round(p.got * 100 / p.total)) : 0;
                 $('#update-progress-bar').style.width = pct + '%';
-                $('#update-progress-text').textContent = pct + '%';
+                // 带上速度，卡住的时候一眼能看出来是不是没在走
+                const speed = p.bps ? ' · ' + (p.bps / 1048576).toFixed(1) + ' MB/s' : '';
+                $('#update-progress-text').textContent = pct + '%' + speed;
               });
             }
             try {
-              // 必须把远端目标版本一并交给主进程，否则 update.bat 的版本校验会反向
-              const applied = await window.cppNative.updateApply(r.url, latest);
+              // 必须把远端目标版本一并交给主进程，否则 update.bat 的版本校验会反向；
+              // size 用来校验下载是否完整。
+              const applied = await window.cppNative.updateApply(r.url, latest, r.size);
               if (applied && applied.ok) {
                 $('#update-title').textContent = '正在重启并更新，请稍候...';
                 $('#update-notes').textContent = '更新完成后游戏会自动重新打开。';

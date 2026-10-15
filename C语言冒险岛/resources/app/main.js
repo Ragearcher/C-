@@ -114,22 +114,23 @@ function wireIpc() {
       return { ok: false, compileError: false, stage: 'run', stdout: '', stderr: e && e.message ? e.message : String(e) };
     }
   });
-  ipcMain.handle('cpp:update-check', async () => {
-    try { return await checkUpdate(); }
+  ipcMain.handle('cpp:update-check', async (_event, payload) => {
+    try { return await checkUpdate(!!(payload && payload.force)); }
     catch (e) { return { needsUpdate: false, error: e && e.message ? e.message : String(e) }; }
   });
   ipcMain.handle('cpp:update-apply', async (_event, payload) => {
     try {
       const url = payload && payload.url;
       const tag = payload && payload.tag;
+      const size = Number((payload && payload.size) || 0) || 0;
       log.info('开始下载更新包：' + url + '（目标版本 ' + tag + '）');
       // 注意：这里必须传「远端目标版本」，而不是本地版本。
       // 旧实现传的是本地 tag，导致 update.bat 的版本校验逻辑完全反向。
-      return await downloadAndApply(url, tag, (got, total) => {
+      return await downloadAndApply(url, tag, (got, total, bps) => {
         if (win && !win.isDestroyed()) {
-          win.webContents.send('cpp:update-progress', { got, total });
+          win.webContents.send('cpp:update-progress', { got, total, bps });
         }
-      });
+      }, size);
     } catch (e) {
       return { ok: false, error: e && e.message ? e.message : String(e) };
     }
