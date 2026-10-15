@@ -1,7 +1,7 @@
 {
   "name": "cpp-quest-desktop",
   "productName": "C 语言冒险岛",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "C 语言冒险岛桌面版：边玩边学 C 语言",
   "main": "main.js",
   "private": true

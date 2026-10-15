@@ -170,6 +170,14 @@ button { font: inherit; cursor: pointer; color: inherit; }
   overflow: auto; font-family: Consolas, "Courier New", monospace; font-size: 13px; line-height: 1.45;
 }
 .lesson-body pre code { background: transparent; border: 0; padding: 0; color: inherit; }
+/* 教材级讲解用到的小节标题、对照表与引用块 */
+.lesson-body h4 { margin: 16px 0 6px; font-size: 13.5px; letter-spacing: .02em; color: var(--primary); }
+.lesson-body h4:first-child { margin-top: 0; }
+.lesson-body table { border-collapse: collapse; width: 100%; margin: 10px 0; font-size: 13px; }
+.lesson-body th, .lesson-body td { border: 1px solid var(--border); padding: 6px 9px; text-align: left; vertical-align: top; }
+.lesson-body th { background: var(--surface-2); font-weight: 700; white-space: nowrap; }
+.lesson-body blockquote { margin: 10px 0; padding: 8px 12px; border-left: 3px solid var(--border-strong); background: var(--surface-2); border-radius: 0 6px 6px 0; color: var(--muted); }
+.lesson-body .tip { line-height: 1.6; }
 .tip { display: flex; gap: 9px; padding: 10px 11px; border-radius: 7px; margin: 10px 0; font-size: 13px; }
 .tip-ico { font-size: 16px; }
 .tip-fun { background: #e6f7ef; border: 1px solid #bfe8d4; }
